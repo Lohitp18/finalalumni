@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
+import 'package:image_picker/image_picker.dart';
+import 'package:http_parser/http_parser.dart';
 import 'pages/connections.dart';
 
 class ProfilePage extends StatefulWidget {
@@ -67,6 +69,47 @@ class _ProfilePageState extends State<ProfilePage> {
       setState(() {
         _loading = false;
       });
+    }
+  }
+
+  Future<void> _pickAndUploadImage({required bool isProfile}) async {
+    try {
+      final ImagePicker picker = ImagePicker();
+      final XFile? file = await picker.pickImage(source: ImageSource.gallery, imageQuality: 85);
+      if (file == null) return;
+
+      await _uploadImage(file, isProfile: isProfile);
+      await _loadProfile();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(isProfile ? 'Profile photo updated' : 'Cover photo updated')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Image update failed: $e')),
+      );
+    }
+  }
+
+  Future<void> _uploadImage(XFile file, {required bool isProfile}) async {
+    const storage = FlutterSecureStorage();
+    final token = await storage.read(key: 'auth_token');
+    if (token == null || token.isEmpty) throw Exception('Authentication required');
+
+    final uri = Uri.parse('${_baseUrl}${isProfile ? '/api/users/profile-image' : '/api/users/cover-image'}');
+    final request = http.MultipartRequest('PUT', uri);
+    request.headers['Authorization'] = 'Bearer $token';
+    final mimeType = 'image/${file.path.split('.').last.toLowerCase()}';
+    request.files.add(await http.MultipartFile.fromPath(
+      'image',
+      file.path,
+      contentType: MediaType.parse(mimeType),
+    ));
+    final streamed = await request.send();
+    final response = await http.Response.fromStream(streamed);
+    if (response.statusCode != 200) {
+      throw Exception(jsonDecode(response.body)['message'] ?? 'Upload failed');
     }
   }
 
@@ -287,43 +330,87 @@ class _ProfilePageState extends State<ProfilePage> {
       ),
       child: Column(
         children: [
-          // Cover Image
-          Container(
-            height: 200,
-            width: double.infinity,
-            decoration: BoxDecoration(
-              color: Colors.grey.shade300,
-              image: _userProfile!['coverImage'] != null
-                  ? DecorationImage(
-                      image: NetworkImage(_userProfile!['coverImage']),
-                      fit: BoxFit.cover,
-                    )
-                  : null,
-            ),
-            child: _userProfile!['coverImage'] == null
-                ? const Icon(Icons.image, size: 80, color: Colors.grey)
-                : null,
+          // Cover Image with edit button
+          Stack(
+            children: [
+              Container(
+                height: 200,
+                width: double.infinity,
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade300,
+                  image: _userProfile!['coverImage'] != null
+                      ? DecorationImage(
+                          image: NetworkImage(_normalizedUrl(_userProfile!['coverImage'])),
+                          fit: BoxFit.cover,
+                        )
+                      : null,
+                ),
+                child: _userProfile!['coverImage'] == null
+                    ? const Icon(Icons.image, size: 80, color: Colors.grey)
+                    : null,
+              ),
+              Positioned(
+                right: 12,
+                bottom: 12,
+                child: ElevatedButton.icon(
+                  onPressed: () => _pickAndUploadImage(isProfile: false),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.black45,
+                    foregroundColor: Colors.white,
+                  ),
+                  icon: const Icon(Icons.camera_alt, size: 18),
+                  label: const Text('Edit cover'),
+                ),
+              ),
+            ],
           ),
-          
+
           // Profile Info
           Padding(
             padding: const EdgeInsets.all(16),
             child: Column(
               children: [
-                // Profile Image
-                CircleAvatar(
-                  radius: 60,
-                  backgroundColor: Colors.white,
-                  backgroundImage: _userProfile!['profileImage'] != null
-                      ? NetworkImage(_userProfile!['profileImage'])
-                      : null,
-                  child: _userProfile!['profileImage'] == null
-                      ? const Icon(Icons.person, size: 60, color: Colors.grey)
-                      : null,
+                // Profile Image with small edit button
+                Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    CircleAvatar(
+                      radius: 60,
+                      backgroundColor: Colors.white,
+                      backgroundImage: _userProfile!['profileImage'] != null
+                          ? NetworkImage(_normalizedUrl(_userProfile!['profileImage']))
+                          : null,
+                      child: _userProfile!['profileImage'] == null
+                          ? const Icon(Icons.person, size: 60, color: Colors.grey)
+                          : null,
+                    ),
+                    Positioned(
+                      right: -4,
+                      bottom: -4,
+                      child: InkWell(
+                        onTap: () => _pickAndUploadImage(isProfile: true),
+                        child: Container(
+                          padding: const EdgeInsets.all(6),
+                          decoration: BoxDecoration(
+                            color: Colors.blue,
+                            shape: BoxShape.circle,
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withOpacity(0.2),
+                                blurRadius: 4,
+                                offset: const Offset(0, 2),
+                              ),
+                            ],
+                          ),
+                          child: const Icon(Icons.camera_alt, color: Colors.white, size: 18),
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
-                
+
                 const SizedBox(height: 16),
-                
+
                 // Name and Headline
                 Text(
                   _userProfile!['name'] ?? 'No Name',
@@ -333,7 +420,7 @@ class _ProfilePageState extends State<ProfilePage> {
                     color: Colors.white,
                   ),
                 ),
-                
+
                 if (_userProfile!['headline'] != null) ...[
                   const SizedBox(height: 8),
                   Text(
@@ -345,7 +432,7 @@ class _ProfilePageState extends State<ProfilePage> {
                     textAlign: TextAlign.center,
                   ),
                 ],
-                
+
                 if (_userProfile!['location'] != null) ...[
                   const SizedBox(height: 8),
                   Row(
@@ -360,9 +447,9 @@ class _ProfilePageState extends State<ProfilePage> {
                     ],
                   ),
                 ],
-                
+
                 const SizedBox(height: 16),
-                
+
                 // Action Buttons
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceEvenly,
@@ -398,6 +485,11 @@ class _ProfilePageState extends State<ProfilePage> {
         ],
       ),
     );
+  }
+
+  String _normalizedUrl(String url) {
+    if (url.startsWith('http')) return url;
+    return _baseUrl + (url.startsWith('/') ? url : '/$url');
   }
 
   Widget _buildAboutSection() {
@@ -738,11 +830,22 @@ class _EditProfileDialog extends StatefulWidget {
 class _EditProfileDialogState extends State<_EditProfileDialog> {
   final _formKey = GlobalKey<FormState>();
   late Map<String, dynamic> _formData;
+  late TextEditingController _currentTitleCtrl;
+  late TextEditingController _currentCompanyCtrl;
+  late TextEditingController _currentLocationCtrl;
 
   @override
   void initState() {
     super.initState();
     _formData = Map.from(widget.userProfile);
+    final experience = (widget.userProfile['experience'] as List<dynamic>?) ?? [];
+    final currentExp = experience.cast<Map<String, dynamic>?>().firstWhere(
+      (e) => (e?['current'] == true),
+      orElse: () => null,
+    );
+    _currentTitleCtrl = TextEditingController(text: currentExp?['title'] ?? '');
+    _currentCompanyCtrl = TextEditingController(text: currentExp?['company'] ?? '');
+    _currentLocationCtrl = TextEditingController(text: currentExp?['location'] ?? '');
   }
 
   @override
@@ -782,6 +885,43 @@ class _EditProfileDialogState extends State<_EditProfileDialog> {
                         ),
                         maxLines: 3,
                         onChanged: (value) => _formData['bio'] = value,
+                      ),
+                      const SizedBox(height: 16),
+                      // Current Position
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: Text(
+                          'Current Position',
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.grey.shade800,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      TextFormField(
+                        controller: _currentTitleCtrl,
+                        decoration: const InputDecoration(
+                          labelText: 'Title (e.g., Software Engineer)',
+                          border: OutlineInputBorder(),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      TextFormField(
+                        controller: _currentCompanyCtrl,
+                        decoration: const InputDecoration(
+                          labelText: 'Company/Organization',
+                          border: OutlineInputBorder(),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      TextFormField(
+                        controller: _currentLocationCtrl,
+                        decoration: const InputDecoration(
+                          labelText: 'Location',
+                          border: OutlineInputBorder(),
+                        ),
                       ),
                       const SizedBox(height: 16),
                       TextFormField(
@@ -843,6 +983,33 @@ class _EditProfileDialogState extends State<_EditProfileDialog> {
                 ),
                 ElevatedButton(
                   onPressed: () {
+                    // Merge current position into experience array
+                    final title = _currentTitleCtrl.text.trim();
+                    final company = _currentCompanyCtrl.text.trim();
+                    final loc = _currentLocationCtrl.text.trim();
+                    List<dynamic> experience = List<dynamic>.from(_formData['experience'] ?? []);
+                    final currentIndex = experience.indexWhere((e) => (e is Map && e['current'] == true));
+                    final payload = {
+                      'title': title,
+                      'company': company,
+                      'location': loc,
+                      'current': true,
+                    };
+                    if (title.isNotEmpty || company.isNotEmpty || loc.isNotEmpty) {
+                      if (currentIndex >= 0) {
+                        // Replace current
+                        experience[currentIndex] = {
+                          ...Map<String, dynamic>.from(experience[currentIndex] as Map),
+                          ...payload,
+                        };
+                      } else {
+                        experience.insert(0, payload);
+                      }
+                    } else if (currentIndex >= 0) {
+                      // Remove if fields all empty
+                      experience.removeAt(currentIndex);
+                    }
+                    _formData['experience'] = experience;
                     widget.onSave(_formData);
                     Navigator.pop(context);
                   },

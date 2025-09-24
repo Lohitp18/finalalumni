@@ -1,6 +1,11 @@
 const User = require("../models/User");
-const bcrypt = require("bcryptjs");
+
 const mongoose = require("mongoose");
+
+const bcrypt = require('bcryptjs');
+const multer = require('multer');
+const path = require('path');
+const fs = require('fs');
 
 // GET /api/users/approved?year=&institution=&course=&q=
 exports.getApprovedAlumni = async (req, res) => {
@@ -192,3 +197,85 @@ exports.resetPasswordByEmail = async (req, res) => {
     return res.status(500).json({ message: "Server error" });
   }
 };
+
+
+// ===== Image Uploads for Profile & Cover =====
+const imageStorage = multer.diskStorage({
+  destination: (_req, _file, cb) => {
+    const uploadDir = 'uploads/';
+    if (!fs.existsSync(uploadDir)) {
+      fs.mkdirSync(uploadDir, { recursive: true });
+    }
+    cb(null, uploadDir);
+  },
+  filename: (_req, file, cb) => {
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
+    cb(null, 'user-' + uniqueSuffix + path.extname(file.originalname));
+  },
+});
+
+const imageUpload = multer({
+  storage: imageStorage,
+  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    if (file.mimetype && file.mimetype.startsWith('image/')) return cb(null, true);
+    return cb(new Error('Only image files are allowed'));
+  }
+}).single('image');
+
+// Middleware wrapper to handle Multer errors cleanly
+const handleImageUpload = (req, res, next) => {
+  imageUpload(req, res, (err) => {
+    if (err) {
+      if (err.code === 'LIMIT_FILE_SIZE') {
+        return res.status(400).json({ message: 'File too large. Max 5MB.' });
+      }
+      return res.status(400).json({ message: err.message || 'Upload failed' });
+    }
+    next();
+  });
+};
+
+// PUT /api/users/profile-image
+const uploadProfileImage = async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ message: 'No image uploaded' });
+    const userId = req.user._id;
+    const imageUrl = `/uploads/${req.file.filename}`;
+    const user = await User.findByIdAndUpdate(
+      userId,
+      { profileImage: imageUrl },
+      { new: true }
+    ).select('-password');
+    if (!user) return res.status(404).json({ message: 'User not found' });
+    return res.json({ message: 'Profile image updated', user });
+  } catch (error) {
+    console.error('Error uploading profile image:', error);
+    return res.status(500).json({ message: 'Server error' });
+  }
+};
+
+// PUT /api/users/cover-image
+const uploadCoverImage = async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ message: 'No image uploaded' });
+    const userId = req.user._id;
+    const imageUrl = `/uploads/${req.file.filename}`;
+    const user = await User.findByIdAndUpdate(
+      userId,
+      { coverImage: imageUrl },
+      { new: true }
+    ).select('-password');
+    if (!user) return res.status(404).json({ message: 'User not found' });
+    return res.json({ message: 'Cover image updated', user });
+  } catch (error) {
+    console.error('Error uploading cover image:', error);
+    return res.status(500).json({ message: 'Server error' });
+  }
+};
+
+module.exports.handleImageUpload = handleImageUpload;
+module.exports.uploadProfileImage = uploadProfileImage;
+module.exports.uploadCoverImage = uploadCoverImage;
+
+
