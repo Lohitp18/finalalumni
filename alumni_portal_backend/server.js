@@ -194,18 +194,23 @@ app.get('/admin/pending-events', (_req, res) => {
     </html>`);
   });
 
-// Error handling middleware
+// 404 handler - must be after all routes
+app.use((req, res) => {
+  // If it's an API route, return JSON
+  if (req.path.startsWith('/api/')) {
+    res.status(404).json({ message: 'API endpoint not found' });
+  } else {
+    res.status(404).send('Page not found');
+  }
+});
+
+// Error handling middleware - must be last
 app.use((err, req, res, next) => {
   console.error('Error:', err);
   res.status(err.status || 500).json({
     message: err.message || 'Internal server error',
     error: process.env.NODE_ENV === 'development' ? err : {}
   });
-});
-
-// 404 handler for API routes
-app.use('/api/*', (req, res) => {
-  res.status(404).json({ message: 'API endpoint not found' });
 });
 
 const PORT = process.env.PORT || 5000;
