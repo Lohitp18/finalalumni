@@ -50,13 +50,37 @@ const registerUser = async (req, res) => {
 // ✅ User Login (Sign In)
 const loginUser = async (req, res) => {
   try {
+    // Validate request body
+    if (!req.body) {
+      return res.status(400).json({ message: "Request body is required" });
+    }
+
     const { email, password } = req.body;
 
-    const user = await User.findOne({ email });
-    if (!user) return res.status(400).json({ message: "Invalid credentials" });
+    // Validate required fields
+    if (!email || !password) {
+      return res.status(400).json({ message: "Email and password are required" });
+    }
+
+    // Trim and validate email format
+    const trimmedEmail = email.trim().toLowerCase();
+    if (!trimmedEmail || trimmedEmail.length === 0) {
+      return res.status(400).json({ message: "Email is required" });
+    }
+
+    if (!password || password.length === 0) {
+      return res.status(400).json({ message: "Password is required" });
+    }
+
+    const user = await User.findOne({ email: trimmedEmail });
+    if (!user) {
+      return res.status(400).json({ message: "Invalid credentials" });
+    }
 
     const isPasswordMatch = await bcrypt.compare(password, user.password);
-    if (!isPasswordMatch) return res.status(400).json({ message: "Invalid credentials" });
+    if (!isPasswordMatch) {
+      return res.status(400).json({ message: "Invalid credentials" });
+    }
 
     // Check if admin approved
     if (user.status !== "approved") {
@@ -70,6 +94,7 @@ const loginUser = async (req, res) => {
       token: generateToken(user._id)
     });
   } catch (error) {
+    console.error("Login error:", error);
     res.status(500).json({ message: "Server error", error: error.message });
   }
 };
